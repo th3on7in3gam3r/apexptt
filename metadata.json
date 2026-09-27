@@ -1,0 +1,8 @@
+{
+  "name": "ApexPTT - Tactical Push-to-Talk Walkie Talkie",
+  "description": "Real-time low-latency push-to-talk voice messaging with group channels, end-to-end encryption, offline status alerts, and synchronized desktop companion mode.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

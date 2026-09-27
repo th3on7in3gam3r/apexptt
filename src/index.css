@@ -1,0 +1,113 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@layer base {
+  :root {
+    --font-chakra: 'Chakra Petch', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #0b0f17;
+    color: #e2e8f0;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow-x: hidden;
+  }
+}
+
+/* Tactical Fonts */
+.font-tactical {
+  font-family: 'Chakra Petch', sans-serif;
+}
+
+.font-code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Authentic Tactical Radio LCD Glows */
+.lcd-green {
+  background-color: #0c1a11;
+  color: #39ff7a;
+  text-shadow: 0 0 8px rgba(57, 255, 122, 0.45);
+}
+
+.lcd-amber {
+  background-color: #1a1205;
+  color: #ffb830;
+  text-shadow: 0 0 8px rgba(255, 184, 48, 0.45);
+}
+
+.lcd-cyan {
+  background-color: #071924;
+  color: #00f0ff;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.45);
+}
+
+.lcd-red {
+  background-color: #1f0b0b;
+  color: #ff3344;
+  text-shadow: 0 0 8px rgba(255, 51, 68, 0.55);
+}
+
+/* Subtle CRT/LCD Scanlines */
+.scanline-overlay {
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.25) 50%
+  ), linear-gradient(
+    90deg,
+    rgba(255, 0, 0, 0.03),
+    rgba(0, 255, 0, 0.01),
+    rgba(0, 0, 255, 0.03)
+  );
+  background-size: 100% 3px, 6px 100%;
+  pointer-events: none;
+}
+
+/* Knurled metallic grip texture */
+.knurled-grip {
+  background: repeating-linear-gradient(
+    45deg,
+    #1e2430,
+    #1e2430 2px,
+    #141923 2px,
+    #141923 4px
+  );
+}
+
+.speaker-grille-pattern {
+  background-image: radial-gradient(#000000 35%, transparent 36%);
+  background-size: 6px 6px;
+  background-color: #131924;
+}
+
+/* Push to Talk Button Active Glow */
+.ptt-glow-transmitting {
+  box-shadow: 0 0 35px rgba(239, 68, 68, 0.6), inset 0 0 15px rgba(255, 255, 255, 0.2);
+}
+
+.ptt-glow-receiving {
+  box-shadow: 0 0 35px rgba(16, 185, 129, 0.6), inset 0 0 15px rgba(255, 255, 255, 0.2);
+}
+
+/* Custom Scrollbar for Tactical Logs */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
