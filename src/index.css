@@ -78,12 +78,6 @@
   );
 }
 
-.speaker-grille-pattern {
-  background-image: radial-gradient(#000000 35%, transparent 36%);
-  background-size: 6px 6px;
-  background-color: #131924;
-}
-
 /* Push to Talk Button Active Glow */
 .ptt-glow-transmitting {
   box-shadow: 0 0 35px rgba(239, 68, 68, 0.6), inset 0 0 15px rgba(255, 255, 255, 0.2);

@@ -650,15 +650,6 @@ export const HandheldWalkieTalkie: React.FC<Props> = ({
           </div>
         )}
 
-        {/* SPEAKER GRILLE */}
-        <div className="w-full h-14 speaker-grille-pattern rounded-xl border border-slate-800 relative flex items-center justify-center shadow-inner overflow-hidden">
-          <div
-            className={`w-12 h-12 rounded-full border border-slate-700/60 transition-transform ${
-              isReceiving ? 'scale-110 bg-emerald-500/10 border-emerald-500/30' : ''
-            }`}
-          ></div>
-        </div>
-
         {/* GIANT TACTICAL PUSH-TO-TALK BUTTON */}
         <div className="flex flex-col items-center gap-2 pt-1">
           <div className="w-full flex items-center justify-between px-2 text-[11px] text-slate-400 font-tactical">
