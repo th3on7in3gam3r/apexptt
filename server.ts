@@ -303,6 +303,10 @@ wss.on('connection', (ws) => {
       switch (msg.type) {
         case 'register': {
           clientId = msg.id || `unit-${Math.random().toString(36).substring(2, 8)}`;
+          const existing = clients.get(clientId);
+          if (existing && existing.ws !== ws) {
+            clientId = `${clientId}-${Math.random().toString(36).substring(2, 6)}`;
+          }
           const channelId = msg.channelId || 'alpha';
           const info: ClientInfo = {
             ws,

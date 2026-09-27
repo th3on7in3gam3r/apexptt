@@ -37,6 +37,7 @@ import {
 
 const SETTINGS_KEY = 'apex_ptt_settings_v1';
 const DEVICE_ID_KEY = 'apex_ptt_device_id_v1';
+const SESSION_ID_KEY = 'apex_ptt_session_id_v1';
 const CHANNELS_KEY = 'apex_ptt_channels_v1';
 const GROUPS_KEY = 'apex_ptt_groups_v1';
 const SYNC_CODE_KEY = 'apex_ptt_sync_code_v1';
@@ -79,12 +80,12 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
-function getOrCreateId(key: string, prefix: string): string {
+function getOrCreateId(key: string, prefix: string, store: Storage = localStorage): string {
   try {
-    const existing = localStorage.getItem(key);
+    const existing = store.getItem(key);
     if (existing) return existing;
     const created = `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    localStorage.setItem(key, created);
+    store.setItem(key, created);
     return created;
   } catch {
     return `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
@@ -113,7 +114,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 export default function App() {
   const deviceId = useMemo(() => getOrCreateId(DEVICE_ID_KEY, 'DEV'), []);
-  const [clientId, setClientId] = useState(() => getOrCreateId(DEVICE_ID_KEY, 'DEV'));
+  const sessionId = useMemo(() => getOrCreateId(SESSION_ID_KEY, 'UNIT', sessionStorage), []);
+  const [clientId, setClientId] = useState(sessionId);
   const [settings, setSettings] = useState<DeviceSettings>(() => loadJson(SETTINGS_KEY, DEFAULT_SETTINGS));
   const [channels, setChannels] = useState<Channel[]>(() => {
     try {
@@ -149,7 +151,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<OfflineNotification[]>(() => offlineManager.getNotifications());
   const [queuedMessages, setQueuedMessages] = useState<VoiceMessage[]>(() => offlineManager.getQueue());
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
-  const [syncCode, setSyncCode] = useState(() => getOrCreateId(SYNC_CODE_KEY, 'SYNC'));
+  const [syncCode, setSyncCode] = useState(() => getOrCreateId(SYNC_CODE_KEY, 'SYNC', sessionStorage));
   const [isScanning, setIsScanning] = useState(false);
   const [scanCountdown, setScanCountdown] = useState(5);
   const [liveTxStartedAt, setLiveTxStartedAt] = useState<number | null>(null);
@@ -294,17 +296,22 @@ export default function App() {
     upsertMessage(message);
 
     const isSelf = raw.senderId === clientIdRef.current;
-    if (!isSelf && message.audioData && cfg.autoPlayIncoming && !mutedRef.current && !transmittingRef.current) {
-      setIsReceiving(true);
-      setReceivingCallsign(raw.callsign);
-      recorderRef.current.setReceivingState(true);
+    if (isSelf) return;
+
+    setIsReceiving(true);
+    setReceivingCallsign(raw.callsign);
+    recorderRef.current.setReceivingState(true);
+
+    const canPlay = Boolean(message.audioData) && !message.decryptionError && cfg.autoPlayIncoming && !mutedRef.current && !transmittingRef.current;
+    if (canPlay && message.audioData) {
       if (cfg.soundEffects) playSquelchStatic(80, cfg.volume * 0.4);
-      await playAudioMessage(message.audioData, cfg.volume);
+      await playAudioMessage(message.audioData, Math.max(0.15, cfg.volume));
       if (cfg.soundEffects) playSquelchStatic(60, cfg.volume * 0.25);
-      setIsReceiving(false);
-      setReceivingCallsign(undefined);
-      recorderRef.current.setReceivingState(false);
     }
+
+    setIsReceiving(false);
+    setReceivingCallsign(undefined);
+    recorderRef.current.setReceivingState(false);
   }, [transcribeLocally, upsertMessage]);
 
   const flushOfflineQueue = useCallback(() => {
@@ -361,7 +368,7 @@ export default function App() {
       setConnectionStatus('connected');
       sendWs({
         type: 'register',
-        id: deviceId,
+        id: sessionId,
         callsign: settingsRef.current.callsign,
         channelId: channelIdRef.current,
         deviceType: viewModeRef.current === 'desktop' ? 'desktop' : 'mobile',
@@ -505,7 +512,7 @@ export default function App() {
     ws.onerror = () => {
       ws.close();
     };
-  }, [deviceId, flushOfflineQueue, handleIncomingVoice, sendWs, upsertMessage]);
+  }, [deviceId, flushOfflineQueue, handleIncomingVoice, sendWs, sessionId, upsertMessage]);
 
   useEffect(() => {
     connectSocket();
@@ -534,9 +541,14 @@ export default function App() {
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
       if (pingTimerRef.current) window.clearInterval(pingTimerRef.current);
       wsRef.current?.close();
-      recorderRef.current.dispose();
     };
   }, [connectSocket, requestMic, sendWs]);
+
+  useEffect(() => {
+    return () => {
+      recorderRef.current.dispose();
+    };
+  }, []);
 
   const startTransmit = useCallback(async (fromVox = false) => {
     if (transmittingRef.current || receivingRef.current) return;
