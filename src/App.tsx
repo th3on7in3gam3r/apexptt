@@ -10,12 +10,14 @@ import { OfflineNotificationsModal } from './components/OfflineNotificationsModa
 import { ChannelGroupingModal } from './components/ChannelGroupingModal';
 import { TacticalMapPreview } from './components/TacticalMapPreview';
 import { AudioLog } from './components/AudioLog';
+import { ReceiveWatchBanner } from './components/ReceiveWatchBanner';
 import {
   playMicChirp,
   playRogerBeep,
   playSquelchStatic,
   playEmergencySiren,
   playAudioMessage,
+  unlockAudio,
   VoiceRecorderManager,
 } from './utils/audioEngine';
 import { encryptAudioPayload, decryptAudioPayload } from './utils/cryptoEngine';
@@ -550,8 +552,23 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const unlock = () => {
+      void unlockAudio();
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('touchstart', unlock, { passive: true });
+    window.addEventListener('keydown', unlock);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('touchstart', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
   const startTransmit = useCallback(async (fromVox = false) => {
     if (transmittingRef.current || receivingRef.current) return;
+    await unlockAudio();
     await requestMic();
     transmittingRef.current = true;
     const startedAt = Date.now();
@@ -774,6 +791,8 @@ export default function App() {
         voxEnabled={settings.voxSettings.enabled}
         onOpenChannelGroupingModal={() => setGroupingOpen(true)}
       />
+
+      <ReceiveWatchBanner connectionStatus={connectionStatus} isMuted={isMuted} />
 
       <main className={`flex-1 w-full max-w-7xl mx-auto px-3 sm:px-4 py-4 ${viewMode === 'dual' ? 'grid xl:grid-cols-2 gap-4' : ''}`}>
         {(viewMode === 'handheld' || viewMode === 'dual') && (

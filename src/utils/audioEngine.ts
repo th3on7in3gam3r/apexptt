@@ -19,6 +19,18 @@ function getAudioContext(): AudioContext {
   return audioCtx;
 }
 
+/** Call from a tap/PTT so iOS Safari can play incoming voice later. */
+export async function unlockAudio(): Promise<void> {
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+  } catch (err) {
+    console.warn('Audio unlock failed', err);
+  }
+}
+
 /**
  * Play authentic Radio Key-Down Mic Chirp (tactical burst when PTT is pressed)
  */
@@ -498,11 +510,13 @@ export class VoiceRecorderManager {
     }
 
     try {
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-        ? 'audio/ogg;codecs=opus'
-        : '';
+      const mimeType =
+        [
+          'audio/mp4',
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus',
+        ].find((type) => MediaRecorder.isTypeSupported(type)) || '';
 
       const recordStream = (this.noiseSuppressionEnabled && this.processedDestination?.stream && this.processedDestination.stream.getAudioTracks().length > 0)
         ? this.processedDestination.stream
@@ -571,17 +585,15 @@ export class VoiceRecorderManager {
             type: this.mediaRecorder?.mimeType || 'audio/webm',
           });
 
-          // If voice modulation or noise suppression is active, process the audio buffer with Web Audio DSP
-          if (this.voiceModulation !== 'standard' || this.noiseSuppressionEnabled) {
-            try {
-              const dspData = await this.applyAudioDsp(blob, this.voiceModulation, this.noiseSuppressionEnabled);
-              if (dspData) {
-                resolve({ audioData: dspData.audioData, duration: dspData.duration });
-                return;
-              }
-            } catch (modErr) {
-              console.warn('Voice DSP fallback to raw audio', modErr);
+          // Always transcode to WAV so iPhone Safari and desktop Chrome can both play the clip
+          try {
+            const dspData = await this.applyAudioDsp(blob, this.voiceModulation, this.noiseSuppressionEnabled);
+            if (dspData) {
+              resolve({ audioData: dspData.audioData, duration: dspData.duration });
+              return;
             }
+          } catch (modErr) {
+            console.warn('Voice DSP fallback to raw audio', modErr);
           }
 
           const reader = new FileReader();
@@ -824,22 +836,42 @@ function audioBufferToWavBase64(buffer: AudioBuffer): string {
 /**
  * Play Audio Data with volume and return playback controls
  */
-export function playAudioMessage(audioDataUrl: string, volume = 0.9): Promise<void> {
-  return new Promise((resolve, reject) => {
-    try {
-      const audio = new Audio(audioDataUrl);
-      audio.volume = Math.max(0, Math.min(1, volume));
+export async function playAudioMessage(audioDataUrl: string, volume = 0.9): Promise<void> {
+  const safeVolume = Math.max(0, Math.min(1, volume));
+
+  try {
+    const audio = new Audio(audioDataUrl);
+    audio.volume = safeVolume;
+    audio.setAttribute('playsinline', 'true');
+    await audio.play();
+    await new Promise<void>((resolve) => {
       audio.onended = () => resolve();
-      audio.onerror = (e) => {
-        console.warn('Audio play error', e);
-        resolve();
-      };
-      audio.play().catch((err) => {
-        console.warn('Audio autoplay failed', err);
-        resolve();
-      });
-    } catch (err) {
-      resolve();
+      audio.onerror = () => resolve();
+    });
+    return;
+  } catch (err) {
+    console.warn('HTML audio play failed, trying Web Audio', err);
+  }
+
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
     }
-  });
+    const response = await fetch(audioDataUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    source.buffer = decoded;
+    gain.gain.value = safeVolume;
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    await new Promise<void>((resolve) => {
+      source.onended = () => resolve();
+      source.start();
+    });
+  } catch (err) {
+    console.warn('Audio play error', err);
+  }
 }
