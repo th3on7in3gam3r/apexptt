@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 20 * 1024 * 1024 });
 
 app.use(express.json({ limit: '50mb' }));
 
@@ -80,6 +80,15 @@ const DEFAULT_CHANNELS = [
   { id: 'echo', name: 'Echo Recon', frequency: '462.6500 MHz', description: 'Forward Reconnaissance & Grid Patrol', group: 'Tactical Operations' },
   { id: 'delta', name: 'Delta Security', frequency: '462.6375 MHz', description: 'Perimeter, Checkpoints & Escort', group: 'Security & Patrol' },
 ];
+
+function historyForClient(channelId: string) {
+  const list = (channelHistory.get(channelId) || []).slice(-20);
+  return list.map((message, index) => {
+    if (index >= list.length - 2) return message;
+    const { audioData: _audioData, ...rest } = message;
+    return rest;
+  });
+}
 
 function broadcastToChannel(channelId: string, message: any, excludeWs?: WebSocket) {
   const data = JSON.stringify(message);
@@ -328,7 +337,7 @@ wss.on('connection', (ws) => {
             channelId,
             channels: DEFAULT_CHANNELS,
             members: getChannelMembers(channelId),
-            history: (channelHistory.get(channelId) || []).slice(-20),
+            history: historyForClient(channelId),
           }));
 
           // Notify channel peers of user arrival
@@ -366,7 +375,7 @@ wss.on('connection', (ws) => {
             type: 'channel_joined',
             channelId: newChannel,
             members: getChannelMembers(newChannel),
-            history: (channelHistory.get(newChannel) || []).slice(-20),
+            history: historyForClient(newChannel),
           }));
 
           // If linked with desktop companion, sync the channel switch!

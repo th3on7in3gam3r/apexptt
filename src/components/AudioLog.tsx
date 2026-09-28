@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
 import { Channel, VoiceMessage } from '../types';
+import { createPlayableAudioUrl } from '../utils/audioEngine';
 
 interface Props {
   messages: VoiceMessage[];
@@ -45,6 +46,7 @@ export const AudioLog: React.FC<Props> = ({
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isTransmitting) return;
@@ -56,6 +58,8 @@ export const AudioLog: React.FC<Props> = ({
     return () => {
       audioRef.current?.pause();
       audioRef.current = null;
+      if (objectUrlRef.current?.startsWith('blob:')) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
     };
   }, []);
 
@@ -73,6 +77,8 @@ export const AudioLog: React.FC<Props> = ({
   const stopPlayback = () => {
     audioRef.current?.pause();
     audioRef.current = null;
+    if (objectUrlRef.current?.startsWith('blob:')) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = null;
     setPlayingId(null);
   };
 
@@ -84,7 +90,11 @@ export const AudioLog: React.FC<Props> = ({
     }
 
     stopPlayback();
-    const audio = new Audio(message.audioData);
+    const playUrl = createPlayableAudioUrl(message.audioData);
+    objectUrlRef.current = playUrl.startsWith('blob:') ? playUrl : null;
+    const audio = new Audio();
+    audio.setAttribute('playsinline', 'true');
+    audio.src = playUrl;
     audio.volume = Math.max(0, Math.min(1, volume));
     audioRef.current = audio;
     setPlayingId(message.id);

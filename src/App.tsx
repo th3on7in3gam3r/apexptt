@@ -225,8 +225,13 @@ export default function App() {
   const sendWs = useCallback((payload: Record<string, unknown>) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(payload));
-      return true;
+      try {
+        ws.send(JSON.stringify(payload));
+        return true;
+      } catch (err) {
+        console.warn('WebSocket send failed', err);
+        return false;
+      }
     }
     return false;
   }, []);

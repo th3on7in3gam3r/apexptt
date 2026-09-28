@@ -31,6 +31,22 @@ export async function unlockAudio(): Promise<void> {
   }
 }
 
+const WALKIETALKIE_SAMPLE_RATE = 16000;
+
+function createMonoOfflineContext(durationSeconds: number): OfflineAudioContext {
+  const rates = [WALKIETALKIE_SAMPLE_RATE, 22050, getAudioContext().sampleRate];
+  let lastError: unknown;
+  for (const rate of rates) {
+    try {
+      const length = Math.max(1, Math.round(durationSeconds * rate));
+      return new OfflineAudioContext(1, length, rate);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 /**
  * Play authentic Radio Key-Down Mic Chirp (tactical burst when PTT is pressed)
  */
@@ -510,12 +526,14 @@ export class VoiceRecorderManager {
     }
 
     try {
+      // Prefer WebM/Opus on Chrome. audio/mp4 first made Chrome record fragmented AAC
+      // that decodeAudioData only keeps the first ~5 seconds of.
       const mimeType =
         [
-          'audio/mp4',
           'audio/webm;codecs=opus',
           'audio/webm',
           'audio/ogg;codecs=opus',
+          'audio/mp4',
         ].find((type) => MediaRecorder.isTypeSupported(type)) || '';
 
       const recordStream = (this.noiseSuppressionEnabled && this.processedDestination?.stream && this.processedDestination.stream.getAudioTracks().length > 0)
@@ -532,7 +550,8 @@ export class VoiceRecorderManager {
         }
       };
 
-      this.mediaRecorder.start(100);
+      // No timeslice: we send one clip on PTT release. timeslice + mp4/fMP4 truncates long takes.
+      this.mediaRecorder.start();
 
       // Start audio level visualizer loop
       if (this.analyser && onLevelUpdate) {
@@ -623,20 +642,14 @@ export class VoiceRecorderManager {
   ): Promise<{ audioData: string; duration: number } | null> {
     const arrayBuffer = await blob.arrayBuffer();
     const ctx = getAudioContext();
-    const decodedBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const decodedBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
 
     // Rate scaling for pitch shifting:
     // high-pitch tactical comms: 1.28x rate + highpass bandpass filter + slight overdrive
     // low-pitch radio filter: 0.78x rate + lowpass resonance filter + sub-bass warmth
     const pitchFactor = modulation === 'high-pitch' ? 1.28 : modulation === 'low-pitch' ? 0.78 : 1.0;
-    const targetLength = Math.max(1, Math.round(decodedBuffer.length / pitchFactor));
-    const targetSampleRate = decodedBuffer.sampleRate;
-
-    const offlineCtx = new OfflineAudioContext(
-      decodedBuffer.numberOfChannels,
-      targetLength,
-      targetSampleRate
-    );
+    const pitchedDuration = decodedBuffer.duration / pitchFactor;
+    const offlineCtx = createMonoOfflineContext(pitchedDuration);
 
     const source = offlineCtx.createBufferSource();
     source.buffer = decodedBuffer;
@@ -771,38 +784,42 @@ export class VoiceRecorderManager {
   }
 }
 
-// Helper to encode AudioBuffer into standard WAV Base64
+// Helper to encode AudioBuffer into 16-bit PCM WAV Base64 (mono)
+function uint8ToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 function audioBufferToWavBase64(buffer: AudioBuffer): string {
-  const numOfChan = buffer.numberOfChannels;
-  const length = buffer.length * numOfChan * 2 + 44;
-  const out = new DataView(new ArrayBuffer(length));
-  const channels: Float32Array[] = [];
-  let sampleRate = buffer.sampleRate;
-  let offset = 0;
+  const numOfChan = 1;
+  const sampleRate = buffer.sampleRate;
+  const length = buffer.length * 2 + 44;
+  const bytes = new Uint8Array(length);
+  const out = new DataView(bytes.buffer);
   let pos = 0;
 
-  function writeString(str: string) {
-    for (let i = 0; i < str.length; i++) {
-      out.setUint8(pos++, str.charCodeAt(i));
-    }
-  }
-
-  function setUint16(data: number) {
+  const writeString = (str: string) => {
+    for (let i = 0; i < str.length; i++) out.setUint8(pos++, str.charCodeAt(i));
+  };
+  const setUint16 = (data: number) => {
     out.setUint16(pos, data, true);
     pos += 2;
-  }
-
-  function setUint32(data: number) {
+  };
+  const setUint32 = (data: number) => {
     out.setUint32(pos, data, true);
     pos += 4;
-  }
+  };
 
   writeString('RIFF');
   setUint32(length - 8);
   writeString('WAVE');
   writeString('fmt ');
   setUint32(16);
-  setUint16(1); // PCM
+  setUint16(1);
   setUint16(numOfChan);
   setUint32(sampleRate);
   setUint32(sampleRate * 2 * numOfChan);
@@ -811,26 +828,36 @@ function audioBufferToWavBase64(buffer: AudioBuffer): string {
   writeString('data');
   setUint32(length - pos - 4);
 
-  for (let i = 0; i < buffer.numberOfChannels; i++) {
-    channels.push(buffer.getChannelData(i));
+  const mix = new Float32Array(buffer.length);
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < data.length; i++) mix[i] += data[i];
+  }
+  const scale = 1 / Math.max(1, buffer.numberOfChannels);
+  for (let i = 0; i < mix.length; i++) {
+    const sample = Math.max(-1, Math.min(1, mix[i] * scale));
+    out.setInt16(pos, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    pos += 2;
   }
 
-  while (offset < buffer.length) {
-    for (let i = 0; i < numOfChan; i++) {
-      let sample = Math.max(-1, Math.min(1, channels[i][offset]));
-      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
-      out.setInt16(pos, sample, true);
-      pos += 2;
-    }
-    offset++;
-  }
+  return `data:audio/wav;base64,${uint8ToBase64(bytes)}`;
+}
 
-  let binary = '';
-  const bytes = new Uint8Array(out.buffer);
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+/** Turn a data URL into a blob URL so Safari can play clips longer than a few seconds. */
+export function createPlayableAudioUrl(data: string): string {
+  if (!data.startsWith('data:')) return data;
+  const comma = data.indexOf(',');
+  if (comma < 0) return data;
+  const mime = data.slice(0, comma).match(/data:([^;,]+)/)?.[1] || 'audio/wav';
+  try {
+    const binary = atob(data.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  } catch (err) {
+    console.warn('Audio blob URL failed', err);
+    return data;
   }
-  return `data:audio/wav;base64,${window.btoa(binary)}`;
 }
 
 /**
@@ -838,16 +865,22 @@ function audioBufferToWavBase64(buffer: AudioBuffer): string {
  */
 export async function playAudioMessage(audioDataUrl: string, volume = 0.9): Promise<void> {
   const safeVolume = Math.max(0, Math.min(1, volume));
+  const playUrl = createPlayableAudioUrl(audioDataUrl);
+  const revoke = () => {
+    if (playUrl.startsWith('blob:')) URL.revokeObjectURL(playUrl);
+  };
 
   try {
-    const audio = new Audio(audioDataUrl);
+    const audio = new Audio();
     audio.volume = safeVolume;
     audio.setAttribute('playsinline', 'true');
+    audio.src = playUrl;
     await audio.play();
     await new Promise<void>((resolve) => {
       audio.onended = () => resolve();
       audio.onerror = () => resolve();
     });
+    revoke();
     return;
   } catch (err) {
     console.warn('HTML audio play failed, trying Web Audio', err);
@@ -858,7 +891,7 @@ export async function playAudioMessage(audioDataUrl: string, volume = 0.9): Prom
     if (ctx.state === 'suspended') {
       await ctx.resume();
     }
-    const response = await fetch(audioDataUrl);
+    const response = await fetch(playUrl);
     const arrayBuffer = await response.arrayBuffer();
     const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
     const source = ctx.createBufferSource();
@@ -873,5 +906,7 @@ export async function playAudioMessage(audioDataUrl: string, volume = 0.9): Prom
     });
   } catch (err) {
     console.warn('Audio play error', err);
+  } finally {
+    revoke();
   }
 }
